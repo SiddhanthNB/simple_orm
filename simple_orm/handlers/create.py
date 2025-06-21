@@ -1,7 +1,9 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Dict, Any, Type, TypeVar
+from typing import Dict, Any, Type, TypeVar, Optional
+from pydantic import ValidationError
 from ..config.database import get_session_sync_
+from ..exceptions import SchemaValidationError
 
 T = TypeVar('T')
 
@@ -13,14 +15,58 @@ class Create:
     The sync method manages sessions automatically, while async requires explicit session passing.
     """
 
-    def __init__(self, model_class: Type[T]):
+    def __init__(self, model_class: Type[T], create_schema: Optional[Type[Any]] = None):
         """
         Initialize the Create handler.
 
         Args:
             model_class: The SQLAlchemy model class to create instances of
+            create_schema: Optional Pydantic schema for validating create data
         """
         self.model_class = model_class
+        self.create_schema = create_schema
+
+    def _validate_schema(self, schema_class: Optional[Type[Any]], data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Validate data against a Pydantic schema and return dict representation.
+
+        Args:
+            schema_class: Pydantic schema class for validation
+            data: Data dictionary to validate
+
+        Returns:
+            Validated data as dictionary
+
+        Raises:
+            SchemaValidationError: If validation fails
+        """
+        if schema_class is None or not data:
+            return data
+
+        try:
+            validated_instance = schema_class(**data)
+            return validated_instance.model_dump(exclude_unset=True)
+        except ValidationError as e:
+            raise SchemaValidationError(
+                f"Schema validation failed for {self.model_class.__name__}",
+                errors=e.errors()
+            )
+
+    def _build_query(self, payload: Dict[str, Any]):
+        """
+        Build the model instance for creation.
+
+        Args:
+            payload: Dictionary containing field values for the new record
+
+        Returns:
+            SQLAlchemy model instance
+        """
+        # Validate payload data
+        validated_data = self._validate_schema(self.create_schema, payload)
+        
+        # Create model instance
+        return self.model_class(**validated_data)
 
     def __call__(self, payload: Dict[str, Any]) -> T:
         """
@@ -33,6 +79,7 @@ class Create:
             The created model instance with populated ID and any database defaults
 
         Raises:
+            SchemaValidationError: If validation fails when schema is provided
             ValueError: If payload contains invalid field names or values
             IntegrityError: If the data violates database constraints
             Exception: For other database-related errors
@@ -41,17 +88,13 @@ class Create:
             user = User.create({"name": "John", "email": "john@example.com"})
             # Record is automatically committed to database
         """
-
-        # Create session
         session = get_session_sync_()
 
         try:
-            # Create instance
-            instance = self.model_class(**payload)
+            instance = self._build_query(payload)
             session.add(instance)
-            session.commit()  # Commit the transaction
+            session.commit()
             session.refresh(instance)
-
             return instance
         except Exception:
             session.rollback()
@@ -70,6 +113,7 @@ class Create:
 
         Raises:
             TypeError: If session is not an AsyncSession
+            SchemaValidationError: If validation fails when schema is provided
             ValueError: If payload contains invalid field names or values
             IntegrityError: If the data violates database constraints
             Exception: For other database-related errors
@@ -83,12 +127,10 @@ class Create:
             raise TypeError("Expected AsyncSession for async operation.")
 
         try:
-            # Create instance
-            instance = self.model_class(**payload)
+            instance = self._build_query(payload)
             session.add(instance)
-            await session.commit()  # Commit the transaction
+            await session.commit()
             await session.refresh(instance)
-
             return instance
         except Exception:
             await session.rollback()

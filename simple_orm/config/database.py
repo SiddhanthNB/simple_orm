@@ -9,52 +9,22 @@ _engine_async = None
 _session_factory_sync = None
 _session_factory_async = None
 
-def configure_database(
-    db_url: str,
-    db_url_async: str,
-    pool_size: int = 10,
-    max_overflow: int = 20,
-    pool_timeout: int = 30,
-    pool_recycle: int = 3600,
-    pool_pre_ping: bool = True,
-    echo: bool = False
-):
+def configure_database(db_url: str, **engine_kwargs):
     """
     Configure sync and async database engines and sessions.
 
     Args:
-        db_url: PostgreSQL URL for sync operations (e.g., postgresql+psycopg://...)
-        db_url_async: PostgreSQL URL for async operations (e.g., postgresql+asyncpg://...)
-        pool_size: Number of connections to maintain in pool
-        max_overflow: Number of connections that can overflow the pool
-        pool_timeout: Timeout for getting connection from pool
-        pool_recycle: Time to recycle connections (seconds)
-        pool_pre_ping: Validate connections before use (prevents stale connections)
-        echo: Whether to echo SQL queries (for debugging)
+        db_url: PostgreSQL URL for both sync and async operations (e.g., postgresql+psycopg://...)
+        **engine_kwargs: SQLAlchemy engine configuration parameters from YAML file
+                        (pool_size, max_overflow, pool_timeout, pool_recycle, pool_pre_ping, echo, etc.)
     """
     global _engine_sync, _engine_async, _session_factory_sync, _session_factory_async
 
-    # Create sync engine
-    _engine_sync = create_engine(
-        db_url,
-        pool_size=pool_size,
-        max_overflow=max_overflow,
-        pool_timeout=pool_timeout,
-        pool_recycle=pool_recycle,
-        pool_pre_ping=pool_pre_ping,
-        echo=echo
-    )
+    # Create sync engine with YAML configuration
+    _engine_sync = create_engine(db_url, **engine_kwargs)
 
-    # Create async engine
-    _engine_async = create_async_engine(
-        db_url_async,
-        pool_size=pool_size,
-        max_overflow=max_overflow,
-        pool_timeout=pool_timeout,
-        pool_recycle=pool_recycle,
-        pool_pre_ping=pool_pre_ping,
-        echo=echo
-    )
+    # Create async engine (same URL and config with psycopg3)
+    _engine_async = create_async_engine(db_url, **engine_kwargs)
 
     # Create session factories
     _session_factory_sync = scoped_session(
