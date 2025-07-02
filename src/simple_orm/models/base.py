@@ -3,9 +3,13 @@ from typing import Optional, Type, Any
 from ..handlers import *
 from ..config.database import get_session_sync_
 from ..exceptions import SchemaBindingError
+from ..query import QueryDescriptor
 
 class BaseModel(DeclarativeBase):
     __abstract__ = True
+
+    # QueryBuilder integration
+    query = QueryDescriptor()
 
     @classmethod
     def bind_crud(cls, validation_schema: Optional[Type[Any]] = None):
